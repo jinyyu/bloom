@@ -67,12 +67,27 @@ func (b *bitmapSetRedis) Set(bits []uint) error {
 	return err
 }
 
-func (b *bitmapSetRedis) Test(i uint) (bool, error) {
-	v, err := redis.Int(b.conn.Do("GETBIT", b.config.BitmapKey, i))
+func (b *bitmapSetRedis) Test(bits []uint) (bool, error) {
+	err := b.conn.Send("MULTI")
 	if err != nil {
 		return false, err
 	}
-	return v != 0, nil
+	for _, bit := range bits {
+		err = b.conn.Send("GETBIT", b.config.BitmapKey, bit)
+		if err != nil {
+			return false, err
+		}
+	}
+	results, err := redis.Ints(b.conn.Do("EXEC"))
+	if err != nil {
+		return false, err
+	}
+	for _, result := range results {
+		if result == 0 {
+			return false, nil
+		}
+	}
+	return true, nil
 }
 
 func (b *bitmapSetRedis) Close() {

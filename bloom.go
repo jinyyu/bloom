@@ -1,6 +1,8 @@
 package bloom
 
-import "github.com/spaolacci/murmur3"
+import (
+	"github.com/spaolacci/murmur3"
+)
 
 // BitmapSet interface
 type BitmapSet interface {
@@ -10,8 +12,8 @@ type BitmapSet interface {
 	// Set each bit in bits, to 1
 	Set(bits []uint) error
 
-	// Test whether bit i is set.
-	Test(i uint) (bool, error)
+	// Test whether bits is set.
+	Test(bits []uint) (bool, error)
 
 	// Close closes the connection.
 	Close()
@@ -38,35 +40,37 @@ func NewBloomFilter(m uint, k uint, bms BitmapSet) (*Bloom, error) {
 	return &b, nil
 }
 
-// baseHashes returns the four hash values of data that are used to create k
-// hashes
-func baseHashes(data []byte) [4]uint64 {
-	a1 := []byte{1} // to grab another bit of data
-	hasher := murmur3.New128()
-	_, _ = hasher.Write(data) // #nosec
-	v1, v2 := hasher.Sum128()
-	_, _ = hasher.Write(a1) // #nosec
-	v3, v4 := hasher.Sum128()
-	return [4]uint64{
-		v1, v2, v3, v4,
-	}
+func computeMurmurHash(data []byte, seed uint32) (hashValues [2]uint) {
+	h := murmur3.New128WithSeed(seed)
+	_, _ = h.Write(data)
+	v1, v2 := h.Sum128()
+	hashValues[0] = uint(v1)
+	hashValues[1] = uint(v2)
+	return hashValues
 }
 
 // location returns the ith hashed location using the four base hash values
-func (b *Bloom) location(h [4]uint64, i uint) uint {
-	ii := uint64(i)
-	v := h[ii%2] + ii*h[2+(((ii+(ii%2))%4)/2)]
-	return uint(v % uint64(b.m))
+func (b *Bloom) location(data []byte) []uint {
+	locations := make([]uint, b.k, b.k)
+	index := uint(0)
+	for seed := uint32(0); ; seed += 1 {
+		//计算一组hash
+		hashValues := computeMurmurHash(data, seed)
+		for _, hashValue := range hashValues {
+			//把这组hash填入locations数组
+			locations[index] = hashValue % b.m
+			index += 1
+			if index == b.k {
+				//填满了，返回
+				return locations
+			}
+		}
+	}
 }
 
 // Add data to the Bloom Filter
 func (b *Bloom) Add(data []byte) error {
-	h := baseHashes(data)
-	locations := make([]uint, b.k)
-	for i := uint(0); i < b.k; i++ {
-		l := b.location(h, i)
-		locations[i] = l
-	}
+	locations := b.location(data)
 	return b.bms.Set(locations)
 }
 
@@ -79,18 +83,8 @@ func (b *Bloom) AddString(data string) error {
 // If true, the result might be a false positive. If false, the data
 // is definitely not in the set.
 func (b *Bloom) Test(data []byte) (bool, error) {
-	h := baseHashes(data)
-	for i := uint(0); i < b.k; i++ {
-		l := b.location(h, i)
-		ok, err := b.bms.Test(l)
-		if err != nil {
-			return false, err
-		}
-		if !ok {
-			return false, nil
-		}
-	}
-	return true, nil
+	locations := b.location(data)
+	return b.bms.Test(locations)
 }
 
 // TestString returns true if the string is in the BloomFilter, false otherwise.

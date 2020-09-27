@@ -19,8 +19,13 @@ func (b *bitmapSetMem) Set(bits []uint) error {
 	return nil
 }
 
-func (b *bitmapSetMem) Test(i uint) (bool, error) {
-	return b.b.Test(i), nil
+func (b *bitmapSetMem) Test(bits []uint) (bool, error) {
+	for _, i := range bits {
+		if !b.b.Test(i) {
+			return false, nil
+		}
+	}
+	return true, nil
 }
 
 func (b *bitmapSetMem) Close() {
